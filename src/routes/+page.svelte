@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { listen } from "@tauri-apps/api/event";
+  import { open } from "@tauri-apps/plugin-dialog";
   import FileCard from "$lib/FileCard.svelte";
   import type { ConvertProgressPayload, ConvertResultPayload, FileItem, Stage } from "$lib/types";
 
@@ -126,6 +127,16 @@
     toast = { visible: false, text: "" };
   }
 
+  async function browseForFiles() {
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: "Images", extensions: [...IMAGE_EXTENSIONS] }],
+    });
+    if (!selected) return;
+    const paths = Array.isArray(selected) ? selected : [selected];
+    ingestPaths(paths);
+  }
+
   onMount(() => {
     let unlistenDrop: (() => void) | undefined;
     let unlistenProgress: (() => void) | undefined;
@@ -181,7 +192,7 @@
 
   <section class="drop-zone" class:active={isDraggingOver} class:has-items={items.length > 0}>
     {#if items.length === 0}
-      <div class="empty-state">
+      <button class="empty-state" onclick={browseForFiles} aria-label="Choose images to convert">
         <div class="drop-icon" class:hovering={isDraggingOver}>
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path
@@ -200,9 +211,9 @@
             />
           </svg>
         </div>
-        <p class="empty-title">Drop images here</p>
+        <p class="empty-title">Drop images here, or click to browse</p>
         <p class="empty-hint">HEIC, PNG, JPEG, WebP, GIF, BMP, TIFF — converted &amp; optimized on your machine</p>
-      </div>
+      </button>
     {:else}
       <div class="file-list">
         {#each items as item, i (item.id)}
@@ -339,6 +350,22 @@
     gap: 10px;
     text-align: center;
     padding: 32px;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    border-radius: var(--radius-lg);
+    transition: background-color var(--duration-regular) var(--ease-standard);
+  }
+
+  .empty-state:hover {
+    background: var(--bg-secondary);
+  }
+
+  .empty-state:hover .drop-icon {
+    transform: translateY(-3px);
+    border-color: var(--border-secondary);
   }
 
   .drop-icon {

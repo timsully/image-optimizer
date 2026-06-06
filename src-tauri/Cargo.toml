@@ -26,4 +26,5 @@ image = "0.25"
 oxipng = { version = "10", default-features = false, features = ["filetime", "parallel"] }
 heic = "0.1"
 rayon = "1"
+tauri-plugin-dialog = "2.7.1"
 
