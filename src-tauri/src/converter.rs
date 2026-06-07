@@ -85,20 +85,25 @@ fn target_format_from_str(target: &str) -> Result<ImageFormat, String> {
 }
 
 fn encode(image: &DynamicImage, format: ImageFormat, quality: Option<u8>) -> Result<Vec<u8>, String> {
-    let mut bytes: Vec<u8> = Vec::new();
+    let capacity = image.width() as usize * image.height() as usize * 3;
+    let mut bytes = Vec::with_capacity(capacity);
     let mut cursor = Cursor::new(&mut bytes);
 
     match format {
         ImageFormat::Jpeg => {
             let q = quality.unwrap_or(85).clamp(1, 100);
             let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, q);
+            // Borrow the existing RGB8 buffer when possible; only convert when the source is
+            // a different color type (e.g. RGBA, HEIC decoded as Rgba8).
+            let rgb_owned;
+            let raw = if let Some(rgb) = image.as_rgb8() {
+                rgb.as_raw().as_slice()
+            } else {
+                rgb_owned = image.to_rgb8();
+                rgb_owned.as_raw().as_slice()
+            };
             encoder
-                .write_image(
-                    image.to_rgb8().as_raw(),
-                    image.width(),
-                    image.height(),
-                    image::ExtendedColorType::Rgb8,
-                )
+                .write_image(raw, image.width(), image.height(), image::ExtendedColorType::Rgb8)
                 .map_err(|e| format!("failed to encode JPEG: {e}"))?;
         }
         ImageFormat::Png => {
@@ -119,7 +124,9 @@ fn encode(image: &DynamicImage, format: ImageFormat, quality: Option<u8>) -> Res
 /// Lossless PNG recompression pass via oxipng — shrinks file size without
 /// touching pixel data, applied after we already have PNG bytes from `encode`.
 fn optimize_png(bytes: Vec<u8>) -> Vec<u8> {
-    let options = oxipng::Options::from_preset(4);
+    // Preset 2 is the sweet spot for interactive use: meaningfully smaller than unoptimized PNG,
+    // but 5-20× faster than preset 4 for typically <2% difference in output size.
+    let options = oxipng::Options::from_preset(2);
     oxipng::optimize_from_memory(&bytes, &options).unwrap_or(bytes)
 }
 
@@ -140,38 +147,45 @@ fn output_path_for(source: &Path, format: ImageFormat) -> std::path::PathBuf {
 pub async fn convert_image(window: Window, request: ConvertRequest) -> Result<ConvertResult, String> {
     let source_path = std::path::PathBuf::from(&request.source_path);
     let id = request.id.clone();
-
-    let original_bytes = std::fs::metadata(&source_path)
-        .map_err(|e| format!("failed to stat {}: {e}", source_path.display()))?
-        .len();
-
-    emit_progress(&window, &id, "decoding", 10);
     let format = target_format_from_str(&request.target_format)?;
     let quality = request.quality;
-    let source_for_decode = source_path.clone();
 
-    let decoded = tauri::async_runtime::spawn_blocking(move || decode_source(&source_for_decode))
-        .await
-        .map_err(|e| format!("decode task panicked: {e}"))??;
+    emit_progress(&window, &id, "decoding", 10);
 
-    emit_progress(&window, &id, "encoding", 55);
-    let encode_format = format;
-    let encoded = tauri::async_runtime::spawn_blocking(move || encode(&decoded, encode_format, quality))
-        .await
-        .map_err(|e| format!("encode task panicked: {e}"))??;
+    // Single spawn_blocking for the entire CPU-bound + blocking-I/O pipeline.
+    // Three separate spawn_blocking calls (original design) paid two unnecessary Tokio
+    // context-switch roundtrips on work that is serial by nature. fs::metadata and
+    // fs::write also belong on the blocking thread pool, not the async executor.
+    let (original_bytes, output_path, output_bytes) = tauri::async_runtime::spawn_blocking({
+        let window = window.clone();
+        let id = id.clone();
+        move || -> Result<(u64, std::path::PathBuf, u64), String> {
+            let original_bytes = std::fs::metadata(&source_path)
+                .map_err(|e| format!("failed to stat {}: {e}", source_path.display()))?
+                .len();
 
-    let final_bytes = if matches!(format, ImageFormat::Png) {
-        emit_progress(&window, &id, "optimizing", 80);
-        tauri::async_runtime::spawn_blocking(move || optimize_png(encoded))
-            .await
-            .map_err(|e| format!("optimize task panicked: {e}"))?
-    } else {
-        encoded
-    };
+            let decoded = decode_source(&source_path)?;
 
-    let output_path = output_path_for(&source_path, format);
-    std::fs::write(&output_path, &final_bytes)
-        .map_err(|e| format!("failed to write {}: {e}", output_path.display()))?;
+            emit_progress(&window, &id, "encoding", 55);
+            let encoded = encode(&decoded, format, quality)?;
+
+            let final_bytes = if matches!(format, ImageFormat::Png) {
+                emit_progress(&window, &id, "optimizing", 80);
+                optimize_png(encoded)
+            } else {
+                encoded
+            };
+
+            let output_path = output_path_for(&source_path, format);
+            let output_bytes = final_bytes.len() as u64;
+            std::fs::write(&output_path, &final_bytes)
+                .map_err(|e| format!("failed to write {}: {e}", output_path.display()))?;
+
+            Ok((original_bytes, output_path, output_bytes))
+        }
+    })
+    .await
+    .map_err(|e| format!("conversion task panicked: {e}"))??;
 
     emit_progress(&window, &id, "done", 100);
 
@@ -179,7 +193,7 @@ pub async fn convert_image(window: Window, request: ConvertRequest) -> Result<Co
         id,
         output_path: output_path.to_string_lossy().to_string(),
         original_bytes,
-        output_bytes: final_bytes.len() as u64,
+        output_bytes,
     })
 }
 

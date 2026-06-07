@@ -38,13 +38,21 @@
     formatMenuOpen = false;
   }
 
-  function handleOutsideClick(event: MouseEvent) {
-    if (formatMenuOpen && formatSelectEl && !formatSelectEl.contains(event.target as Node)) {
-      formatMenuOpen = false;
+  // Only attach the outside-click listener while the menu is actually open.
+  $effect(() => {
+    if (!formatMenuOpen) return;
+    function handleOutsideClick(event: MouseEvent) {
+      if (formatSelectEl && !formatSelectEl.contains(event.target as Node)) {
+        formatMenuOpen = false;
+      }
     }
-  }
+    window.addEventListener("click", handleOutsideClick);
+    return () => window.removeEventListener("click", handleOutsideClick);
+  });
 
   let items = $state<FileItem[]>([]);
+  // O(1) id→index map so progress events don't scan the full array on every tick.
+  const itemIndex = new Map<string, number>();
   let isDraggingOver = $state(false);
   let toast = $state<{ visible: boolean; text: string }>({ visible: false, text: "" });
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -65,7 +73,9 @@
   }
 
   function updateItem(id: string, patch: Partial<FileItem>) {
-    items = items.map((it) => (it.id === id ? { ...it, ...patch } : it));
+    const idx = itemIndex.get(id);
+    if (idx === undefined) return;
+    items[idx] = { ...items[idx], ...patch };
   }
 
   async function processFile(item: FileItem) {
@@ -94,16 +104,17 @@
 
   function maybeAnnounceBatchDone() {
     if (items.length === 0) return;
-    const allSettled = items.every((it) => it.stage === "done" || it.stage === "error");
-    if (!allSettled) return;
-
-    const succeeded = items.filter((it) => it.stage === "done").length;
-    const failed = items.filter((it) => it.stage === "error").length;
+    let succeeded = 0;
+    let failed = 0;
+    for (const it of items) {
+      if (it.stage === "done") succeeded++;
+      else if (it.stage === "error") failed++;
+      else return; // still in progress — bail early
+    }
     const text =
       failed === 0
         ? `Converted ${succeeded} ${succeeded === 1 ? "image" : "images"} to ${targetFormat.toUpperCase()}`
         : `Converted ${succeeded}, ${failed} failed`;
-
     showToast(text);
   }
 
@@ -119,6 +130,7 @@
     const imagePaths = paths.filter((p) => IMAGE_EXTENSIONS.has(extOf(p)));
     if (imagePaths.length === 0) return;
 
+    const startIdx = items.length;
     const newItems: FileItem[] = imagePaths.map((path) => ({
       id: makeId(),
       path,
@@ -129,16 +141,19 @@
     }));
 
     items = [...items, ...newItems];
+    newItems.forEach((item, i) => itemIndex.set(item.id, startIdx + i));
 
-    // Stagger kickoff so the "pop + settle" entrance cascades, then process
-    // concurrently — each card animates its own shimmer/progress independently.
-    newItems.forEach((item, i) => {
-      setTimeout(() => processFile(item), i * 60);
-    });
+    // CSS animation-delay on each card already staggers the entrance visually;
+    // kick off all conversions immediately so the last file in a large batch
+    // doesn't wait N*60ms before decode even starts.
+    for (const item of newItems) {
+      processFile(item);
+    }
   }
 
   function clearAll() {
     items = [];
+    itemIndex.clear();
     toast = { visible: false, text: "" };
   }
 
@@ -182,8 +197,6 @@
     };
   });
 </script>
-
-<svelte:window onclick={handleOutsideClick} />
 
 <main class="app">
   <header class="topbar">
