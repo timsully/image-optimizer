@@ -5,6 +5,8 @@ including HEIC (iPhone photos) → PNG/JPEG/WebP — by dragging and dropping fi
 onto the window. Built with [Tauri](https://tauri.app) (Rust) + Svelte for a tiny,
 native-feeling app instead of a bundled-Chromium Electron app.
 
+![Image Optimizer screenshot](docs/screenshot.png)
+
 ## Stack
 
 - **Tauri v2** — Rust backend, native OS webview (small binaries, low memory)

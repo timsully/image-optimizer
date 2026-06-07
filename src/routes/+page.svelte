@@ -29,6 +29,21 @@
   ];
 
   let targetFormat = $state("png");
+  let formatMenuOpen = $state(false);
+  let formatSelectEl: HTMLDivElement | undefined;
+  const targetFormatLabel = $derived(FORMATS.find((f) => f.value === targetFormat)?.label ?? targetFormat);
+
+  function selectFormat(value: string) {
+    targetFormat = value;
+    formatMenuOpen = false;
+  }
+
+  function handleOutsideClick(event: MouseEvent) {
+    if (formatMenuOpen && formatSelectEl && !formatSelectEl.contains(event.target as Node)) {
+      formatMenuOpen = false;
+    }
+  }
+
   let items = $state<FileItem[]>([]);
   let isDraggingOver = $state(false);
   let toast = $state<{ visible: boolean; text: string }>({ visible: false, text: "" });
@@ -168,6 +183,8 @@
   });
 </script>
 
+<svelte:window onclick={handleOutsideClick} />
+
 <main class="app">
   <header class="topbar">
     <div class="brand">
@@ -176,14 +193,45 @@
     </div>
 
     <div class="controls">
-      <label class="format-select">
-        <span>Convert to</span>
-        <select bind:value={targetFormat}>
-          {#each FORMATS as f (f.value)}
-            <option value={f.value}>{f.label}</option>
-          {/each}
-        </select>
-      </label>
+      <div class="format-select" bind:this={formatSelectEl}>
+        <button
+          type="button"
+          class="format-trigger"
+          aria-haspopup="listbox"
+          aria-expanded={formatMenuOpen}
+          onclick={() => (formatMenuOpen = !formatMenuOpen)}
+        >
+          <span class="format-trigger-label">Convert to</span>
+          <span class="format-trigger-value">{targetFormatLabel}</span>
+          <svg class="format-chevron" class:open={formatMenuOpen} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path
+              d="M4 6l4 4 4-4"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+        {#if formatMenuOpen}
+          <ul class="format-menu" role="listbox">
+            {#each FORMATS as f (f.value)}
+              <li role="presentation">
+                <button
+                  type="button"
+                  class="format-option"
+                  class:selected={f.value === targetFormat}
+                  role="option"
+                  aria-selected={f.value === targetFormat}
+                  onclick={() => selectFormat(f.value)}
+                >
+                  {f.label}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
       {#if items.length > 0}
         <button class="ghost-btn" onclick={clearAll}>Clear</button>
       {/if}
@@ -272,6 +320,10 @@
   }
 
   .format-select {
+    position: relative;
+  }
+
+  .format-trigger {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -281,22 +333,71 @@
     border: 1px solid var(--border-primary);
     border-radius: var(--radius-md);
     padding: 6px 10px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color var(--duration-fade-out) ease-out, background-color var(--duration-quick) ease-in-out;
   }
 
-  .format-select select {
-    background: transparent;
-    border: none;
+  .format-trigger:hover {
+    border-color: var(--border-secondary);
+    background: var(--bg-tertiary);
+  }
+
+  .format-trigger-value {
     color: var(--text-primary);
     font-size: var(--text-small);
     font-weight: var(--weight-medium);
-    font-family: inherit;
-    outline: none;
-    cursor: pointer;
   }
 
-  .format-select select option {
+  .format-chevron {
+    width: 14px;
+    height: 14px;
+    color: var(--text-tertiary);
+    transition: transform var(--duration-quick) ease-in-out;
+  }
+
+  .format-chevron.open {
+    transform: rotate(180deg);
+  }
+
+  .format-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    width: 100%;
+    list-style: none;
+    margin: 0;
+    padding: 4px;
     background: var(--bg-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-medium);
+    z-index: 20;
+  }
+
+  .format-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
     color: var(--text-primary);
+    font-family: inherit;
+    font-size: var(--text-small);
+    font-weight: var(--weight-medium);
+    cursor: pointer;
+    transition: background-color var(--duration-quick) ease-in-out;
+  }
+
+  .format-option:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .format-option.selected {
+    background: var(--accent-tint);
+    color: var(--accent-hover);
   }
 
   .ghost-btn {

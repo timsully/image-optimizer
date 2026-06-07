@@ -183,6 +183,13 @@ pub async fn convert_image(window: Window, request: ConvertRequest) -> Result<Co
     })
 }
 
+#[tauri::command]
+pub async fn save_image_to(source_path: String, dest_path: String) -> Result<(), String> {
+    std::fs::copy(&source_path, &dest_path)
+        .map(|_| ())
+        .map_err(|e| format!("failed to save: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

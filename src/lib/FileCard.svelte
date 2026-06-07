@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { save } from "@tauri-apps/plugin-dialog";
+  import { invoke } from "@tauri-apps/api/core";
   import type { FileItem } from "./types";
 
   let { item, index }: { item: FileItem; index: number } = $props();
@@ -29,6 +31,19 @@
 
   let entranceDelay = $derived(`${index * 50}ms`);
   let isActive = $derived(item.stage !== "done" && item.stage !== "error");
+
+  async function saveImage() {
+    if (!item.outputPath) return;
+    const ext = item.outputPath.split(".").pop() ?? "png";
+    const stem = item.name.replace(/\.[^.]+$/, "");
+    const dest = await save({
+      defaultPath: `${stem}.${ext}`,
+      filters: [{ name: "Image", extensions: [ext] }],
+    });
+    if (dest) {
+      await invoke("save_image_to", { sourcePath: item.outputPath, destPath: dest });
+    }
+  }
 </script>
 
 <div
@@ -75,6 +90,11 @@
           <span class="savings">{savings(item)}</span>
         {/if}
       </div>
+      {#if item.outputPath}
+        <button class="reveal-btn" onclick={saveImage}>
+          Save
+        </button>
+      {/if}
     {:else}
       <div class="status">
         {#if item.stage === "queued"}
@@ -307,5 +327,28 @@
       transform: translateY(-2px) scaleY(1.15);
       opacity: 1;
     }
+  }
+
+  .reveal-btn {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-sm);
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: var(--text-micro);
+    font-weight: var(--weight-medium);
+    padding: 3px 7px;
+    transition:
+      border-color var(--duration-quick) ease-in-out,
+      color var(--duration-quick) ease-in-out,
+      background-color var(--duration-quick) ease-in-out;
+  }
+
+  .reveal-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-secondary);
+    color: var(--text-primary);
   }
 </style>
